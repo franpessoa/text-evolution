@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-
+use serde_derive::Serialize;
 use rand::{thread_rng, Rng};
+use nanoid::nanoid;
 
 pub fn distance(a: &String, b: &String) -> Option<u16> {
     let (mut it_target, mut it_content) = (a.chars().into_iter(), b.chars().into_iter());
@@ -19,32 +20,35 @@ pub fn distance(a: &String, b: &String) -> Option<u16> {
     }
 }   
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct Individual {
-    target: String,
-    content: String,
-    parent: Option<Box<Individual>>
+    pub id: String,
+    pub content: String,
+    pub parent: Option<String>
 }
 
+#[derive(Serialize, Clone, Debug)]
 pub struct Simulation {
-    target: String,
-    individuals: Vec<Individual>,
-    num_clones: u32,
-    survivors: u32,
-    mut_count: u16,
-    gen_count: u32
+    pub target: String,
+    pub individuals: Vec<Individual>,
+    pub num_clones: u32,
+    pub survivors: u32,
+    pub mut_count: u16,
+    pub gen_count: u32
 }
 
 impl Individual {
-    fn new(t: String, c: String, parent: Option<Box<Individual>>) -> Self { 
-        match parent {
-            Some(y) => return Self { target: t, content: c, parent: Some(y) },
-            None => return Self {target: t, content: c, parent: None}
-        }
+    pub fn new(c: String, parent: Option<String>) -> Self { 
+        return Self {
+            id: nanoid!(5),
+            content: c,
+            parent
+        } 
     }
     
-    fn mutate(&self, count: u8) -> Self {
+    pub fn mutate(&self, count: u8) -> Self {
         let mut content = self.content.clone();
+        
         let all_chars: String = format!(
             "{}{}{}{}",
             "abcdefghijklmnopqrstuvwxyz",
@@ -54,32 +58,41 @@ impl Individual {
         );
 
         let mut rng = thread_rng();
+        let mut mutations = Vec::new();
         
         // Generating and applying random mutations
         for _ in 0..count {
-            let mutation = (
-                rng.gen_range(0..count), 
+            mutations.push((
+                rng.gen_range(0..content.chars().count()), 
                 all_chars.chars().nth(
                     rng.gen_range(0..all_chars.chars().count()).try_into().unwrap()
                 ).unwrap()
-            );
-            
-            content = content.chars().enumerate().map(|(idx, ch)| {
-                if mutation.0 == idx as u8 { return mutation.1 } else {return ch} 
-            }).collect::<String>();
+            ));
         };
         
-        return Self::new(self.target.to_owned(), content, Some(Box::new(self.clone())))
+        content = content.chars().enumerate().map(|(idx, ch)| {
+            let mut return_char = ch;
+            for mutation in &mutations {
+                if mutation.0 == idx { return_char =  mutation.1 }
+            }
+            return return_char
+        }).collect::<String>();
+        
+        return Self::new(content, Some(self.id.clone()))
     }
     
-    fn is_target(&self) -> bool {
-        return self.content == self.target;
+    pub fn is_target(&self, target: &String) -> bool {
+        return &self.content == target;
+    }
+    
+    pub fn compare(&self, target: &String) -> Option<u16> {
+        return distance(target, &self.content)
     }
 }
 
 
 impl Simulation {
-    async fn advance_gen(&self) -> Self {
+    pub fn advance_gen(&self) -> Self {
         let mut new_inds: Vec<Individual> = Vec::new();
         
         // Loop through all individuals
@@ -90,7 +103,7 @@ impl Simulation {
         }
         
         new_inds.sort_unstable_by(|a, b| {
-            distance(&a.content, &a.target).partial_cmp(&distance(&b.content, &b.target)).unwrap()
+            distance(&a.content, &self.target).partial_cmp(&distance(&b.content, &self.target)).unwrap()
         });
         
         if self.gen_count < 5 {
@@ -99,7 +112,7 @@ impl Simulation {
                 unique_parents.entry(x.parent.clone()).or_insert(x.clone());
             };
             
-            for x in &new_inds[0..(self.survivors as usize)].to_vec() {
+            for x in &new_inds[0..(self.survivors as usize)] {
                 unique_parents.remove(&x.parent);
             }
             
